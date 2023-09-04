@@ -1,5 +1,5 @@
 <template>
-	<div id="app">
+	<div id="app" class="d-flex flex-column h-100">
 		<b-navbar toggleable="md" type="light" variant="light" class="rt-navbar">
 				<div class="container">
 					<b-navbar-toggle target="nav_collapse"></b-navbar-toggle>
@@ -20,13 +20,14 @@
 										</b-tooltip>
 									</div>
 								</div>
+								<button @click="showPreview = !showPreview; setShowPreview();" class="addbtnhover"><font-awesome-icon :icon="showPreview ? 'eye' : 'eye-slash'" class="mr-4 ml-0"/> Vorschau</button>
 							</b-nav-item-dropdown>
-							<b-nav-item to="/info" :class="$route.path === '/info' ? ' active' : ''" :disabled="Files.changed"><font-awesome-icon icon="info"/></b-nav-item>
+							<b-nav-item to="/info" :class="$route.path === '/info' ? ' active' : ''" :disabled="changed"><font-awesome-icon icon="info"/></b-nav-item>
 						</b-navbar-nav>
 					</b-collapse>
 				</div>
 		</b-navbar>
-		<router-view></router-view>
+		<router-view @changed="onChanged" />
 	</div>
 </template>
 
@@ -49,32 +50,35 @@
 			return {
 				devMode: (process.env.NODE_ENV === 'development'),
 				zoom: 1,
-				lineHeight: 1.5,
-				addBtnHover: true
+				changed: false,
+				showPreview: true
 			}
 		},
 		mounted () {
 			console.log(this.$route.path)
 		},
 		methods: {
+			onChanged (c) {
+				console.log('onChanged', c)
+				this.changed = c
+			},
 			setZoom () {
 				this.$store.dispatch('SET_OPTIONS', { 'option': 'zoom', 'value': this.zoom })
 				webFrame.setZoomFactor(parseFloat(this.Options.options.zoom))
+			},
+			setShowPreview () {
+				this.$store.dispatch('SET_OPTIONS', { 'option': 'showPreview', 'value': this.showPreview })
 			}
 		},
 		computed: {
 			...mapState(['Options']),
-			...mapState(['Files']),
 		},
 		watch: {
 			'Options.options.zoom' (nVal) {
 				this.zoom = nVal
 			},
-			'Options.options.lineHeight' (nVal) {
-				this.lineHeight = nVal
-			},
-			'Options.options.addBtnHover' (nVal) {
-				this.addBtnHover = nVal
+			'Options.options.showPreview' (nVal) {
+				this.showPreview = nVal
 			}
 		},
 		created () {
@@ -98,6 +102,9 @@
 <style>
 	@import url('~@/assets/css/lato.css');
 	@import url('~@/assets/css/fiduz.css');
+	html, body {
+		height: 100%;
+	}
 	.rel {
 		position: relative;
 	}

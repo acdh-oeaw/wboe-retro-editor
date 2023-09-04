@@ -1,21 +1,22 @@
 <template>
-  <div class="start-page mib50">
-    <div class="container">
-      <br>
+  <div class="start-page mib50 d-flex flex-column flex-grow-1">
+    <div class="container-fluid d-flex flex-column h-100 flex-grow-1">
       <b-alert show variant="danger" v-if="Object.keys(filesystem.errors).length > 0">
         <ul class="my-0">
           <li v-for="(err, i) in filesystem.errors" :key="'e' + i"><b>{{ i }}:</b> {{ err }}</li>
         </ul>
       </b-alert>
-      <div class="project-path" v-if="Options.projectPath">
-        <font-awesome-icon icon="project-diagram" class="mir10" style="float:left;" />
-        <p>
-          <!-- Projektpfad -->
-          <button @click="updateFolder" title="Projektpfad neu laden" class="fx-btn" :disabled="changed"><font-awesome-icon icon="sync-alt" class="mil5 mir5"/></button>
-          <button @click="showFolder" title="Ordner in Explorer öffnen" class="fx-btn" :disabled="changed"><font-awesome-icon icon="external-link-alt" class="mil5 mir5"/></button>
-          <button @click="selectFolder" title="Verzeichniss ändern" class="fx-btn" :disabled="changed"><font-awesome-icon icon="edit" class="mil5 mir5"/></button>
-          {{ Options.projectPath }}
-        </p>
+      <div class="project-path d-flex flex-column h-100 flex-grow-1" v-if="Options.projectPath">
+        <div class="mt-3">
+          <font-awesome-icon icon="project-diagram" class="mir10" style="float:left;" />
+          <p>
+            <!-- Projektpfad -->
+            {{ Options.projectPath }}
+            <button @click="selectFolder" title="Verzeichniss ändern" class="fx-btn" :disabled="changed"><font-awesome-icon icon="edit" class="mil5 mir5"/></button>
+            <button @click="showFolder" title="Ordner in Explorer öffnen" class="fx-btn" :disabled="changed"><font-awesome-icon icon="external-link-alt" class="mil5 mir5"/></button>
+            <button @click="updateFolder" title="Projektpfad neu laden" class="fx-btn" :disabled="changed"><font-awesome-icon icon="sync-alt" class="mil5 mir5"/></button>
+          </p>
+        </div>
         <div class="mb-3">
           <b-button-toolbar class="main-toolbar">
             <b-input-group class="pr-3 mw33p">
@@ -31,8 +32,17 @@
             </b-input-group>
           </b-button-toolbar>
         </div>
-        <div>
-          <div id="editor" style="min-height: 500px; border: 1px solid #aaa;" class="h100" autofocus></div>
+        <div class="flex-grow-1" style="position: relative;">
+          <div class="row" style="position: absolute; left:0; right: 0; width: calc(100% + 30px); height: 100%;">
+            <div :class="(Options.options.showPreview ? 'col-6' : 'col-12') + ' h-100'">
+              <div id="editor" style="border: 1px solid #aaa;" class="h100" autofocus></div>
+            </div>
+            <div class="col-6 h-100" v-if="Options.options.showPreview">
+              <div :style="'border: 1px solid ' + (changed ? '#daa' : '#aaa') + '; background-color: ' + (changed ? '#eee' : '#fff') + '; overflow: auto;'" class="h100 p-3">
+                <Preview :xml="orgContent" v-if="orgContent" />
+              </div>
+            </div>
+          </div>
         </div>
       </div>
       <b-alert show variant="danger" v-else>Projektpfad nicht vergeben!</b-alert>
@@ -42,10 +52,8 @@
 </template>
 
 <script>
-  // import { nextTick } from 'process'
-  // import _ from 'lodash'
   import { mapState } from 'vuex'
-  // import fPath from 'path'
+  import Preview from './StartPage/Preview'
   const sax = require('sax')
   sax.MAX_BUFFER_LENGTH = 128 * 1024
 
@@ -87,7 +95,6 @@
     },
     computed: {
       ...mapState(['Options']),
-      ...mapState(['Files']),
       changed () {
         return this.filesystem.selEntry > -1 && this.filesystem.fileData.entries[this.filesystem.selEntry] && this.content !== this.orgContent
       }
@@ -273,6 +280,10 @@
       }
     },
     watch: {
+      changed () {
+        console.log('changed ...', this.changed)
+        this.$emit('changed', this.changed)
+      },
       'filesystem.selFile' () {
         this.updateSelFile()
       },
@@ -285,9 +296,15 @@
       },
       'filesystem.selEntry' () {
         this.updateSelEntry()
+      },
+      'Options.options.showPreview' () {
+        this.$nextTick(() => {
+          this.editor.layout()
+        })
       }
     },
     components: {
+      Preview
     }
   }
 

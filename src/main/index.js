@@ -67,7 +67,7 @@ function createWindow () {
    * Initial window options
    */
   mainWindow = new BrowserWindow({
-    width: 1220,
+    width: process.env.NODE_ENV === 'development' ? 1690 : 1220,
     height: 800,
     webPreferences: {
       webSecurity: false
@@ -76,16 +76,15 @@ function createWindow () {
   mainWindow.loadURL(winURL)
 
   mainWindow.on('close', function (e) {
-  var choice = require('electron').dialog.showMessageBox(this,
-      {
+    var choice = require('electron').dialog.showMessageBox(this, {
         type: 'question',
         buttons: ['Ja', 'Nein'],
         title: 'Wirklich beenden?',
         message: 'Sind sie sicher das sie das Programm beenden wollen?'
       })
-      if (choice === 1) {
-        e.preventDefault()
-      }
+    if (choice === 1) {
+      e.preventDefault()
+    }
   })
 
   mainWindow.on('closed', () => {
