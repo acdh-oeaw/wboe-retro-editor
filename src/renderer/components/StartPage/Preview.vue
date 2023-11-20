@@ -6,20 +6,19 @@
 </template>
 
 <script>
-  import XmlObject from '../../functions/xml/Xml'
   let noNote = false
   let htmlHeader = []
 
   export default {
     name: 'Preview',
     props: {
-      xml: String
+      xml: String,
+      xmlObj: Object
     },
     data () {
       return {
         lemma: '',
-        preview: '',
-        xmlObj: {}
+        preview: ''
       }
     },
     mounted () {
@@ -28,15 +27,13 @@
     computed: {
     },
     watch: {
-      xml () {
+      xmlObj () {
         this.updatePreview()
       }
     },
     methods: {
       updatePreview () {
         console.log('updatePreview')
-        this.xmlObj = new XmlObject.XmlBase(this.xml, () => void 0)
-        // console.log(this.xmlObj.content)
         let preview = this.renderer(this.xmlObj.content[0], '')
         // console.log(preview)
         let aLemma = this.xmlObj.family.filter((e) => e.name === 'form' && e.attributes && e.attributes.type && e.attributes.type === 'lemma' && e.parents && e.parents[0] && e.parents[0].name && e.parents[0].name === 'entry')

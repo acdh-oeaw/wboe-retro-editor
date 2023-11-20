@@ -21,11 +21,9 @@
           <b-button-toolbar class="main-toolbar">
             <b-input-group class="pr-3 mw33p">
               <b-form-select v-model="filesystem.selFile" :options="filesystem.files" :disabled="changed"></b-form-select>
-              <!-- <b-input-group-append><b-btn variant="primary" :disabled="!filesystem.selFile"><font-awesome-icon icon="info" /></b-btn></b-input-group-append> -->
             </b-input-group>
             <b-input-group class="pr-3 mw33p">
-              <b-form-select v-model="filesystem.selEntry" :options="filesystem.entry" :disabled="!filesystem.selFile || changed"></b-form-select>
-              <!-- <b-input-group-append><b-btn variant="primary" :disabled="!(filesystem.selEntry > -1)"><font-awesome-icon icon="info" /></b-btn></b-input-group-append> -->
+              <b-form-select v-model="filesystem.selEntry" :options="filesystem.entry" :disabled="!filesystem.selFile"></b-form-select>
             </b-input-group>
             <b-input-group class="pr-3 mw33p">
               <b-btn @click="save" variant="primary" :disabled="!changed">Speichern</b-btn>
@@ -39,7 +37,7 @@
             </div>
             <div class="col-6 h-100" v-if="Options.options.showPreview">
               <div :style="'border: 1px solid ' + (changed ? '#daa' : '#aaa') + '; background-color: ' + (changed ? '#eee' : '#fff') + '; overflow: auto;'" class="h100 p-3">
-                <Preview :xml="orgContent" v-if="orgContent" />
+                <Preview :xml="orgContent" :xmlObj="xmlObj" v-if="orgContent && filesystem.selEntry > -1" />
               </div>
             </div>
           </div>
@@ -54,6 +52,7 @@
 <script>
   import { mapState } from 'vuex'
   import Preview from './StartPage/Preview'
+  import XmlObject from '../functions/xml/Xml'
   const sax = require('sax')
   sax.MAX_BUFFER_LENGTH = 128 * 1024
 
@@ -71,20 +70,25 @@
           files: [{ value: null, text: 'Datei auswählen ...' }],
           fileData: {
             content: '',
-            header: '',
+            header: {
+              content: '',
+              pos: { start: 0, end: 0 }
+            },
             entries: []
           },
           selEntry: -1,
           entry: [{ value: -1, text: 'Eintrag auswählen ...' }],
           errors: {}
         },
+        aSelEntry: null,
         content: '',
         orgContent: '',
         selection: {},
         monaco: {},
         editor: {},
         editorModel: null,
-        orgModel: null
+        orgModel: null,
+        xmlObj: {}
       }
     },
     mounted () {
@@ -93,19 +97,19 @@
         loadMonacoEditor(this)
       })
     },
-    computed: {
-      ...mapState(['Options']),
-      changed () {
-        return this.filesystem.selEntry > -1 && this.filesystem.fileData.entries[this.filesystem.selEntry] && this.content !== this.orgContent
-      }
-    },
     methods: {
       save () {
-        if (this.filesystem.selEntry > -1 && this.filesystem.fileData.entries[this.filesystem.selEntry] && this.content !== this.orgContent) {
-          let entry = this.filesystem.fileData.entries[this.filesystem.selEntry]
-          let newFileContent = this.filesystem.fileData.content.slice(0, entry.pos.start) + this.content + this.filesystem.fileData.content.slice(entry.pos.end)
+        if (this.changed) {
           let aFile = this.Options.projectPath + '\\' + this.filesystem.selFile
-          console.log('Speichern ...', entry, entry.pos.start, entry.pos.end, [aFile, newFileContent])
+          let newFileContent = this.filesystem.fileData.content
+          if (this.filesystem.selEntry === 'teiHeader') {
+            newFileContent = this.filesystem.fileData.content.slice(0, this.filesystem.fileData.header.pos.start) + this.content + this.filesystem.fileData.content.slice(this.filesystem.fileData.header.pos.end)
+            console.log('teiHeader')
+          } else {
+            let entry = this.filesystem.fileData.entries[this.filesystem.selEntry]
+            newFileContent = this.filesystem.fileData.content.slice(0, entry.pos.start) + this.content + this.filesystem.fileData.content.slice(entry.pos.end)
+            console.log('Speichern ...', entry, entry.pos.start, entry.pos.end, [aFile, newFileContent])
+          }
           this.filesystem.errors = {}
           if (this.checkXMLData(this.content)) {
             if (this.checkXMLData(newFileContent)) {
@@ -145,7 +149,10 @@
         this.filesystem.selFile = null
         this.filesystem.files = [{ value: null, text: 'Datei auswählen ...' }]
         this.filesystem.fileData.content = ''
-        this.filesystem.fileData.header = ''
+        this.filesystem.fileData.header = {
+          content: '',
+          pos: { start: 0, end: 0 }
+        }
         this.filesystem.fileData.entries = []
         this.filesystem.selEntry = -1
         this.filesystem.entry = [{ value: -1, text: 'Eintrag auswählen ...' }]
@@ -194,7 +201,10 @@
       updateSelFile () {
         this.filesystem.entry = [{ value: -1, text: 'Eintrag auswählen ...' }]
         this.filesystem.fileData.content = ''
-        this.filesystem.fileData.header = ''
+        this.filesystem.fileData.header = {
+          content: '',
+          pos: { start: 0, end: 0 }
+        }
         this.filesystem.fileData.entries = []
         this.filesystem.selEntry = -1
         this.filesystem.errors = {}
@@ -211,7 +221,8 @@
             let eDg = 0
             let ePos = -1
             let hPos = -1
-            let lemmaId = null
+            let lemmaId = ''
+            let eId = null
             parser.onerror = (e) => {
               console.log('saxes error:', e)
               this.filesystem.errors['XMLError' + errDg] = 'XML Fehler!\n' + e.message
@@ -220,12 +231,16 @@
             parser.onopentag = (node) => {
               if (node.name === 'entry') {
                 ePos = parser.startTagPosition - 1
+                if (node.attributes['xml:id']) {
+                  eId = node.attributes['xml:id']
+                }
               }
               if (node.name === 'teiHeader') {
                 hPos = parser.startTagPosition - 1
+                this.filesystem.fileData.header.pos.start = hPos
               }
               if (node.name === 'form' && node.attributes && node.attributes.type && node.attributes.type === 'lemma' && node.attributes['xml:id']) {
-                lemmaId = node.attributes['xml:id'].trim()
+                lemmaId = lemmaId + node.attributes['xml:id'].trim()
               }
             }
             parser.ontext = (txt) => {
@@ -236,6 +251,7 @@
                 this.filesystem.fileData.entries.push({
                   nr: eDg,
                   title: aTitle,
+                  id: eId || lemmaId || ('nr_' + eDg),
                   content: this.filesystem.fileData.content.slice(ePos, parser.position),
                   pos: {
                     start: ePos,
@@ -243,11 +259,14 @@
                   }
                 })
                 this.filesystem.entry.push({ value: eDg, text: aTitle })
-                lemmaId = null
+                lemmaId = ''
+                eId = null
                 eDg += 1
               }
               if (tag === 'teiHeader') {
-                this.filesystem.fileData.header = this.filesystem.fileData.content.slice(hPos, parser.position)
+                this.filesystem.fileData.header.content = this.filesystem.fileData.content.slice(hPos, parser.position)
+                this.filesystem.fileData.header.pos.end = parser.position
+                this.filesystem.entry.push({ value: 'teiHeader', text: 'teiHeader' })
               }
             }
             parser.onprocessinginstruction = (node) => {
@@ -263,12 +282,54 @@
         console.log('updateSelFile', this.filesystem.fileData)
       },
       updateSelEntry () {
-        if (this.filesystem.selEntry > -1 && this.filesystem.fileData.entries[this.filesystem.selEntry] && this.filesystem.fileData.entries[this.filesystem.selEntry].content) {
+        if (this.filesystem.selEntry === 'teiHeader') {
+          this.content = this.filesystem.fileData.header.content
+          this.orgContent = this.content
+          this.xmlObj = new XmlObject.XmlBase(this.orgContent, () => void 0)
+          let revisionDesc = this.xmlObj.family.filter((e) => e.name === 'revisionDesc')
+          if (!(revisionDesc && revisionDesc[0])) {
+            this.content = this.content.replace(/(\t*)(<\/fileDesc>)/gim, '$1$2\n$1<revisionDesc>\n$1\t<listChange>\n$1\t</listChange>\n$1</revisionDesc>')
+          }
+          // Namen hinzufügen!
+          let resp = this.xmlObj.family.filter((e) => e.name === 'resp' && e.getValue()[0].indexOf('DBOE Team') > -1)
+          if (!(resp && resp[0])) {
+            this.content = this.content.replace(/(\t*)(<\/titleStmt>)/gim, '$1\t<respStmt>\n$1\t\t<resp>DBOE Team</resp>\n$1\t</respStmt>\n$1$2')
+          }
+          var teamMembers = [
+            { name: 'Alexandra N. Lenz', id: 'AL' },
+            { name: 'Philipp Stöckle', id: 'PhS' },
+            { name: 'Andreas Gellan', id: 'AG' },
+            { name: 'Patrick Zeitlhuber', id: 'PZ' },
+            { name: 'Sabine Wahl', id: 'SW' },
+            { name: 'Sonja Schwaiger', id: 'SS' },
+            { name: 'Angela Bergermayer', id: 'AB' },
+            { name: 'Eva Wahlmüller', id: 'EW' },
+            { name: 'David Gschösser', id: 'DG' },
+            { name: 'Stefanie Schöberl', id: 'StS' },
+            { name: 'Fabian Fleißnerv', id: 'FF' },
+            { name: 'Markus Kunzmann', id: 'MK' },
+            { name: 'Agnes Kim', id: 'AK' },
+            { name: 'Ingeborg Geyer', id: 'IG' },
+            { name: 'Katharina Korecky-Kröllv', id: 'KK' },
+            { name: 'Manfred Glauningerv', id: 'MG' }
+          ].reverse()
+          let teamMembersFiltered = teamMembers.filter((e) => this.xmlObj.family.filter((e2) => e2.name === 'name' && e2.attributes['xml:id'] && e2.attributes['xml:id'] === e.id).length === 0)
+          teamMembersFiltered.forEach(teamMember => {
+            this.content = this.content.replace(/(\t*)(<resp>DBOE Team<\/resp>)/gim, '$1$2\n$1<name xml:id="' + (teamMember.id) + '">' + (teamMember.name) + '</name>')
+          })
+        } else if (this.filesystem.selEntry > -1 && this.filesystem.fileData.entries[this.filesystem.selEntry] && this.filesystem.fileData.entries[this.filesystem.selEntry].content) {
           this.content = this.filesystem.fileData.entries[this.filesystem.selEntry].content
           this.orgContent = this.content
+          this.xmlObj = new XmlObject.XmlBase(this.orgContent, () => void 0)
+          let entryWithId = this.xmlObj.family.filter((e) => e.name === 'entry' && e.attributes['xml:id'])
+          if ((entryWithId && entryWithId[0] ? entryWithId[0].attributes['xml:id'] : null) !== this.filesystem.fileData.entries[this.filesystem.selEntry].id) {
+            this.content = this.content.replace(/(<entry[^>]*)(>)/gim, '$1 xml:id="' + this.filesystem.fileData.entries[this.filesystem.selEntry].id + '"$2')
+          }
+          // console.log('updateSelEntry', {entry: this.filesystem.fileData.entries[this.filesystem.selEntry], xmlObj: this.xmlObj, content: this.content})
         } else {
           this.content = ''
           this.orgContent = ''
+          this.xmlObj = {}
         }
         this.editorModel.setValue(this.content)
         if (this.Options.show.monacoDiff) {
@@ -279,7 +340,31 @@
         }
       }
     },
+    computed: {
+      ...mapState(['Options']),
+      changed () {
+        return (this.aSelEntry === 'teiHeader' || (this.aSelEntry > -1 && this.filesystem.fileData.entries[this.aSelEntry])) && this.content !== this.orgContent
+      }
+    },
     watch: {
+      'filesystem.selEntry' (nVal, oVal) {
+        if (nVal !== this.aSelEntry) {
+          if (this.changed) {
+            if (confirm('Änderungen wirklich verwerfen?')) {
+              this.updateSelEntry()
+              this.aSelEntry = nVal
+            } else {
+              this.$nextTick(() => {
+                this.$set(this.filesystem, 'selEntry', oVal)
+              })
+              console.log(this.aSelEntry, this.filesystem.selEntry, oVal)
+            }
+          } else {
+            this.updateSelEntry()
+            this.aSelEntry = nVal
+          }
+        }
+      },
       changed () {
         console.log('changed ...', this.changed)
         this.$emit('changed', this.changed)
@@ -293,9 +378,6 @@
           this.updateFolder()
           this.loading = false
         }
-      },
-      'filesystem.selEntry' () {
-        this.updateSelEntry()
       },
       'Options.options.showPreview' () {
         this.$nextTick(() => {
