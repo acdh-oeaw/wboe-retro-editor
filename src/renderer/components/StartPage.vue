@@ -26,7 +26,13 @@
               <b-form-select v-model="filesystem.selEntry" :options="filesystem.entry" :disabled="!filesystem.selFile"></b-form-select>
             </b-input-group>
             <b-input-group class="pr-3 mw33p">
-              <b-btn @click="save" variant="primary" :disabled="!changed">Speichern</b-btn>
+              <History :headerData="newHistoryData" :filesystem="filesystem" :teamMembers="teamMembers" @historyChanged="historyChanged" />
+            </b-input-group>
+            <b-input-group class="pr-3 mw33p">
+              <b-btn title="Änderungen speichern" @click="save" variant="primary" :disabled="!changed">Speichern</b-btn>
+            </b-input-group>
+            <b-input-group class="pr-3 mw33p">
+              <b-btn title="Änderungen verwerfen" @click="discard" variant="warning" :disabled="!changed">Verwerfen</b-btn>
             </b-input-group>
           </b-button-toolbar>
         </div>
@@ -52,6 +58,7 @@
 <script>
   import { mapState } from 'vuex'
   import Preview from './StartPage/Preview'
+  import History from './StartPage/History'
   import XmlObject from '../functions/xml/Xml'
   const sax = require('sax')
   sax.MAX_BUFFER_LENGTH = 128 * 1024
@@ -72,6 +79,7 @@
             content: '',
             header: {
               content: '',
+              historyData: [],
               pos: { start: 0, end: 0 }
             },
             entries: []
@@ -83,12 +91,32 @@
         aSelEntry: null,
         content: '',
         orgContent: '',
+        newHistoryData: [],
         selection: {},
         monaco: {},
         editor: {},
         editorModel: null,
         orgModel: null,
-        xmlObj: {}
+        xmlObj: {},
+        headerChangeData: null,
+        teamMembers: [
+          { name: 'Alexandra N. Lenz', id: 'AL' },
+          { name: 'Philipp Stöckle', id: 'PhS' },
+          { name: 'Andreas Gellan', id: 'AG' },
+          { name: 'Patrick Zeitlhuber', id: 'PZ' },
+          { name: 'Sabine Wahl', id: 'SW' },
+          { name: 'Sonja Schwaiger', id: 'SS' },
+          { name: 'Angela Bergermayer', id: 'AB' },
+          { name: 'Eva Wahlmüller', id: 'EW' },
+          { name: 'David Gschösser', id: 'DG' },
+          { name: 'Stefanie Schöberl', id: 'StS' },
+          { name: 'Fabian Fleißnerv', id: 'FF' },
+          { name: 'Markus Kunzmann', id: 'MK' },
+          { name: 'Agnes Kim', id: 'AK' },
+          { name: 'Ingeborg Geyer', id: 'IG' },
+          { name: 'Katharina Korecky-Kröllv', id: 'KK' },
+          { name: 'Manfred Glauningerv', id: 'MG' }
+        ]
       }
     },
     mounted () {
@@ -109,10 +137,21 @@
             let entry = this.filesystem.fileData.entries[this.filesystem.selEntry]
             newFileContent = this.filesystem.fileData.content.slice(0, entry.pos.start) + this.content + this.filesystem.fileData.content.slice(entry.pos.end)
             console.log('Speichern ...', entry, entry.pos.start, entry.pos.end, [aFile, newFileContent])
+            if (this.headerChangeData) {
+              let newHistoryContent = this.newHistoryData.sort((a, b) => { var targetDiff = a.target.localeCompare(b.target); return targetDiff === 0 ? a.when.localeCompare(b.when) : targetDiff })
+                                                         .map(h => '<change target="' + h.target + '" who="' + h.who + '" when="' + h.when + '">' + this.clearText(h.txt) + '</change>')
+              let newHeaderContent = this.filesystem.fileData.header.content
+              newHeaderContent = newHeaderContent.replace(
+                /(\t*)(<revisionDesc>[\S\s]*<listChange>)([\S\s]*)(<\/listChange>[\S\s]*<\/revisionDesc>)/gim,
+                '$1$2\n$1\t\t' + newHistoryContent.join('\n$1\t\t') + '\n$1\t$4'
+              )
+              newFileContent = newFileContent.slice(0, this.filesystem.fileData.header.pos.start) + newHeaderContent + newFileContent.slice(this.filesystem.fileData.header.pos.end)
+              console.log('headerChangeData', [newHeaderContent, newFileContent])
+            }
           }
           this.filesystem.errors = {}
-          if (this.checkXMLData(this.content)) {
-            if (this.checkXMLData(newFileContent)) {
+          if (this.checkXMLData('\n' + this.content)) {
+            if (this.checkXMLData('\n' + newFileContent)) {
               try {
                 fs.writeFileSync(aFile, newFileContent, 'utf8')
                 let oldSelEntry = this.filesystem.selEntry
@@ -124,11 +163,16 @@
                 alert('Beim speichern kam es zu einem Fehler!\nDatei NICHT gespeichert!')
               }
             } else {
-              alert('Datei konnte nicht gespeichert werden!')
+              alert('Datei konnte nicht gespeichert werden! (nFC)')
             }
           } else {
-            alert('Datei konnte nicht gespeichert werden!')
+            alert('Datei konnte nicht gespeichert werden! (c)')
           }
+        }
+      },
+      discard () {
+        if (confirm('Änderungen wirklich verwerfen?')) {
+          this.updateSelEntry()
         }
       },
       selectFolder () {		// Projektpfad auswählen und speichern
@@ -151,6 +195,7 @@
         this.filesystem.fileData.content = ''
         this.filesystem.fileData.header = {
           content: '',
+          historyData: [],
           pos: { start: 0, end: 0 }
         }
         this.filesystem.fileData.entries = []
@@ -203,8 +248,10 @@
         this.filesystem.fileData.content = ''
         this.filesystem.fileData.header = {
           content: '',
+          historyData: [],
           pos: { start: 0, end: 0 }
         }
+        this.newHistoryData = []
         this.filesystem.fileData.entries = []
         this.filesystem.selEntry = -1
         this.filesystem.errors = {}
@@ -223,6 +270,8 @@
             let hPos = -1
             let lemmaId = ''
             let eId = null
+            let inNode = null
+            let lText = ''
             parser.onerror = (e) => {
               console.log('saxes error:', e)
               this.filesystem.errors['XMLError' + errDg] = 'XML Fehler!\n' + e.message
@@ -239,11 +288,16 @@
                 hPos = parser.startTagPosition - 1
                 this.filesystem.fileData.header.pos.start = hPos
               }
+              if (node.name === 'change' && this.filesystem.fileData.header.pos.end === 0) {
+                inNode = node.attributes
+              }
               if (node.name === 'form' && node.attributes && node.attributes.type && node.attributes.type === 'lemma' && node.attributes['xml:id']) {
                 lemmaId = lemmaId + node.attributes['xml:id'].trim()
               }
+              lText = ''
             }
             parser.ontext = (txt) => {
+              lText += txt
             }
             parser.onclosetag = (tag) => {
               if (tag === 'entry') {
@@ -268,10 +322,17 @@
                 this.filesystem.fileData.header.pos.end = parser.position
                 this.filesystem.entry.push({ value: 'teiHeader', text: 'teiHeader' })
               }
+              if (tag === 'change' && inNode) {
+                inNode.txt = lText
+                this.filesystem.fileData.header.historyData.push(inNode)
+                inNode = null
+              }
+              lText = ''
             }
             parser.onprocessinginstruction = (node) => {
             }
             parser.onend = () => {
+              this.newHistoryData = JSON.parse(JSON.stringify(this.filesystem.fileData.header.historyData))
               console.log('parser.onend', this.filesystem.fileData)
             }
             parser.write(this.filesystem.fileData.content).close()
@@ -283,47 +344,46 @@
       },
       updateSelEntry () {
         if (this.filesystem.selEntry === 'teiHeader') {
+          this.filesystem.errors = {}
           this.content = this.filesystem.fileData.header.content
           this.orgContent = this.content
+          this.newHistoryData = JSON.parse(JSON.stringify(this.filesystem.fileData.header.historyData))
           this.xmlObj = new XmlObject.XmlBase(this.orgContent, () => void 0)
           let revisionDesc = this.xmlObj.family.filter((e) => e.name === 'revisionDesc')
           if (!(revisionDesc && revisionDesc[0])) {
-            this.content = this.content.replace(/(\t*)(<\/fileDesc>)/gim, '$1$2\n$1<revisionDesc>\n$1\t<listChange>\n$1\t</listChange>\n$1</revisionDesc>')
+            this.content = this.content.replace(
+              /(\t*)(<\/fileDesc>)/gim,
+              '$1$2\n$1<revisionDesc>\n$1\t<listChange>\n$1\t</listChange>\n$1</revisionDesc>'
+            )
           }
           // Namen hinzufügen!
           let resp = this.xmlObj.family.filter((e) => e.name === 'resp' && e.getValue()[0].indexOf('DBOE Team') > -1)
           if (!(resp && resp[0])) {
-            this.content = this.content.replace(/(\t*)(<\/titleStmt>)/gim, '$1\t<respStmt>\n$1\t\t<resp>DBOE Team</resp>\n$1\t</respStmt>\n$1$2')
+            this.content = this.content.replace(
+              /(\t*)(<\/titleStmt>)/gim,
+              '$1\t<respStmt>\n$1\t\t<resp>DBOE Team</resp>\n$1\t</respStmt>\n$1$2'
+            )
           }
-          var teamMembers = [
-            { name: 'Alexandra N. Lenz', id: 'AL' },
-            { name: 'Philipp Stöckle', id: 'PhS' },
-            { name: 'Andreas Gellan', id: 'AG' },
-            { name: 'Patrick Zeitlhuber', id: 'PZ' },
-            { name: 'Sabine Wahl', id: 'SW' },
-            { name: 'Sonja Schwaiger', id: 'SS' },
-            { name: 'Angela Bergermayer', id: 'AB' },
-            { name: 'Eva Wahlmüller', id: 'EW' },
-            { name: 'David Gschösser', id: 'DG' },
-            { name: 'Stefanie Schöberl', id: 'StS' },
-            { name: 'Fabian Fleißnerv', id: 'FF' },
-            { name: 'Markus Kunzmann', id: 'MK' },
-            { name: 'Agnes Kim', id: 'AK' },
-            { name: 'Ingeborg Geyer', id: 'IG' },
-            { name: 'Katharina Korecky-Kröllv', id: 'KK' },
-            { name: 'Manfred Glauningerv', id: 'MG' }
-          ].reverse()
+          var teamMembers = JSON.parse(JSON.stringify(this.teamMembers)).reverse()
           let teamMembersFiltered = teamMembers.filter((e) => this.xmlObj.family.filter((e2) => e2.name === 'name' && e2.attributes['xml:id'] && e2.attributes['xml:id'] === e.id).length === 0)
           teamMembersFiltered.forEach(teamMember => {
-            this.content = this.content.replace(/(\t*)(<resp>DBOE Team<\/resp>)/gim, '$1$2\n$1<name xml:id="' + (teamMember.id) + '">' + (teamMember.name) + '</name>')
+            this.content = this.content.replace(
+              /(\t*)(<resp>DBOE Team<\/resp>)/gim,
+              '$1$2\n$1<name xml:id="' + (teamMember.id) + '">' + (teamMember.name) + '</name>'
+            )
           })
         } else if (this.filesystem.selEntry > -1 && this.filesystem.fileData.entries[this.filesystem.selEntry] && this.filesystem.fileData.entries[this.filesystem.selEntry].content) {
+          this.filesystem.errors = {}
           this.content = this.filesystem.fileData.entries[this.filesystem.selEntry].content
           this.orgContent = this.content
+          this.newHistoryData = JSON.parse(JSON.stringify(this.filesystem.fileData.header.historyData))
           this.xmlObj = new XmlObject.XmlBase(this.orgContent, () => void 0)
           let entryWithId = this.xmlObj.family.filter((e) => e.name === 'entry' && e.attributes['xml:id'])
           if ((entryWithId && entryWithId[0] ? entryWithId[0].attributes['xml:id'] : null) !== this.filesystem.fileData.entries[this.filesystem.selEntry].id) {
-            this.content = this.content.replace(/(<entry[^>]*)(>)/gim, '$1 xml:id="' + this.filesystem.fileData.entries[this.filesystem.selEntry].id + '"$2')
+            this.content = this.content.replace(
+              /(<entry[^>]*)(>)/gim,
+              '$1 xml:id="entry-' + this.filesystem.fileData.entries[this.filesystem.selEntry].id + '"$2'
+            )
           }
           // console.log('updateSelEntry', {entry: this.filesystem.fileData.entries[this.filesystem.selEntry], xmlObj: this.xmlObj, content: this.content})
         } else {
@@ -331,6 +391,7 @@
           this.orgContent = ''
           this.xmlObj = {}
         }
+        this.headerChangeData = null
         this.editorModel.setValue(this.content)
         if (this.Options.show.monacoDiff) {
           this.orgModel.setValue(this.orgContent)
@@ -338,12 +399,22 @@
         } else {
           this.editor.setModel(this.editorModel)
         }
+      },
+      historyChanged (changedHistoryData) {
+        console.log('historyChanged', changedHistoryData)
+        this.newHistoryData = JSON.parse(JSON.stringify(changedHistoryData))
+        this.headerChangeData = true
+      },
+      clearText (txt) {
+        var clearedTxt = document.createElement('div')
+        clearedTxt.textContent = txt
+        return clearedTxt.innerHTML
       }
     },
     computed: {
       ...mapState(['Options']),
       changed () {
-        return (this.aSelEntry === 'teiHeader' || (this.aSelEntry > -1 && this.filesystem.fileData.entries[this.aSelEntry])) && this.content !== this.orgContent
+        return this.headerChangeData || ((this.aSelEntry === 'teiHeader' || (this.aSelEntry > -1 && this.filesystem.fileData.entries[this.aSelEntry])) && this.content !== this.orgContent)
       }
     },
     watch: {
@@ -386,7 +457,8 @@
       }
     },
     components: {
-      Preview
+      Preview,
+      History
     }
   }
 
